@@ -1,5 +1,6 @@
 use regex::{Error, Regex};
 
+/// A simple way to be able to compare regex, as well as compile them only once rather than every time.
 #[derive(Clone, Debug)]
 pub struct MemoryRegex {
     regex: Regex,
