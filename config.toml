@@ -328,3 +328,10 @@ or
 r (?i)um\s+actually
 '''
 content = "https://tenor.com/view/nerd-nerd-glasses-uhm-aktually-glasses-gif-4161113894351475297"
+
+[[responses]]
+name = "757"
+ruleset = """
+r (?i)757
+"""
+content = "THE BOEING 757 IS SIMPLY THE BEST SINGLE ISLE AIRCRAFT EVER BUILT AND NOBODY CAN MAKE ME NOT SAY IT IS!!!!!!!!!!"
