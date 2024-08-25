@@ -8,7 +8,7 @@ use bot_lib::{
         course_catalog::course_catalog,
         help::help,
         llm_prompt::llm_prompt,
-        lynch::{lynch, update_interval},
+        lynch::{lynch, lynch_leaderboard, update_interval},
         register::register,
         sathya::sathya,
         set_bot_role::{add_bot_role, remove_bot_role},
@@ -23,6 +23,7 @@ use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr};
 use dotenvy::dotenv;
 use poise::serenity_prelude as serenity;
+use tokio::io::{stdin, AsyncReadExt};
 use tracing_subscriber::util::SubscriberInitExt;
 
 /// The cli arguments for the bot
@@ -76,6 +77,7 @@ async fn main() -> Result<()> {
                 reset_class_category(),
                 reset_class_categories(),
                 delete_class_category(),
+                lynch_leaderboard(),
                 add_dog_role(),
                 remove_dog_role(),
                 update_class_category(),
@@ -128,6 +130,31 @@ async fn main() -> Result<()> {
         println!("Bot setup worked, dry run enabled, exiting");
         return Ok(());
     }
+
+    tokio::task::spawn(async {
+        let mut stdin = stdin();
+        let mut key = [0; 1];
+        loop {
+            stdin
+                .read_exact(&mut key)
+                .await
+                .inspect_err(|e| {
+                    tracing::error!("Failed to read from stdin: {:?}", e);
+                })
+                .ok();
+
+            // This will be expanded later
+            match key[0] {
+                b'd' => {
+                    println!("Debug");
+                }
+                b's' => {
+                    println!("Status check");
+                }
+                _ => {}
+            }
+        }
+    });
 
     tracing::info!("Starting bot");
 
