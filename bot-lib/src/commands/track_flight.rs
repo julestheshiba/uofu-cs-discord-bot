@@ -18,15 +18,28 @@ struct AirportResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct FlightResponse {
+    response: Option<FlightData>,
+    error: Option<AirlabsError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AircraftResponse {
+    response: Option<AircraftData>,
+    error: Option<AirlabsError>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AirportData {
     lat: Option<f64>,
     lng: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
-struct FlightResponse {
-    response: Option<FlightData>,
-    error: Option<AirlabsError>,
+struct AircraftData {
+    reg: Option<String>,
+    lat: Option<f64>,
+    lng: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,13 +156,9 @@ async fn airport_lookup(api_key: &str, code: &str) -> Result<AirportData> {
     let searched_icao = ICAO_RE_AIRP.is_match(&code);
 
     let url = if searched_iata {
-        format!(
-            "https://airlabs.co/api/v9/airports?iata_code={code}&api_key={api_key}"
-        )
+        format!("https://airlabs.co/api/v9/airports?iata_code={code}&api_key={api_key}")
     } else if searched_icao {
-        format!(
-            "https://airlabs.co/api/v9/airports?icao_code={code}&api_key={api_key}"
-        )
+        format!("https://airlabs.co/api/v9/airports?icao_code={code}&api_key={api_key}")
     } else {
         return Err(eyre!("Invalid airport code: {code}"));
     };
@@ -210,6 +219,33 @@ async fn flight_lookup(ctx: PoiseContext<'_>, api_key: &str, code: &str) -> Opti
     };
 
     Some(flight)
+}
+
+async fn aircraft_lookup(ctx: PoiseContext<'_>, api_key: &str, reg: &str) -> Option<AircraftData> {
+    let date = Local::now().format("%Y-%m-%d").to_string();
+
+    let url = format!(
+        "https://airlabs.co/api/v9/fleets?reg_number={reg}&api_key={api_key}&flight_date={date}"
+    );
+
+    let client = reqwest::Client::new();
+    let response: AircraftResponse = client.get(url).send().await.ok()?.json().await.ok()?;
+
+    if let Some(err) = response.error {
+        ctx.reply(format!("API Error: {}", err.message))
+            .await
+            .ok()?;
+        return None;
+    }
+
+    let Some(aircraft) = response.response else {
+        ctx.reply("No aircraft found for that registration number.")
+            .await
+            .ok()?;
+        return None;
+    };
+
+    Some(aircraft)
 }
 
 ///get information on a specified flight
@@ -287,7 +323,9 @@ pub async fn track_flight(ctx: PoiseContext<'_>, search: String) -> Result<()> {
 
     let mut embed = CreateEmbed::new()
         .title(format!("Flight {flight_label}"))
-        .url(format!("https://www.flightradar24.com/data/flights/{flight_label}"))
+        .url(format!(
+            "https://www.flightradar24.com/data/flights/{flight_label}"
+        ))
         .field("Airline", airline, true)
         .field("\u{200B}", "\u{200B}", true)
         .field("Status", &status, true)
@@ -312,10 +350,8 @@ pub async fn track_flight(ctx: PoiseContext<'_>, search: String) -> Result<()> {
         let arrival_airport = match airport_lookup(&api_key, &arr_code).await {
             Ok(airport) => airport,
             Err(e) => {
-                ctx.reply(format!(
-                    "Failed to lookup arrival airport {arr_code}: {e}"
-                ))
-                .await?;
+                ctx.reply(format!("Failed to lookup arrival airport {arr_code}: {e}"))
+                    .await?;
                 return Ok(());
             }
         };
@@ -438,7 +474,9 @@ pub async fn plane_details(ctx: PoiseContext<'_>, search: String) -> Result<()> 
 
     let embed = CreateEmbed::new()
         .title(format!("Aircraft Details for Flight {flight_label}"))
-        .url(format!("https://www.flightradar24.com/data/flights/{flight_label}"))
+        .url(format!(
+            "https://www.flightradar24.com/data/flights/{flight_label}"
+        ))
         .field("Airline", airline, true)
         .field("Status", status, true)
         .field("\u{200B}", "\u{200B}", true)
