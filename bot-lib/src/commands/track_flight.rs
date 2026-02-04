@@ -25,7 +25,7 @@ struct FlightResponse {
 
 #[derive(Debug, Deserialize)]
 struct AircraftResponse {
-    response: Option<AircraftData>,
+    response: Option<Vec<AircraftData>>,
     error: Option<AirlabsError>,
 }
 
@@ -37,13 +37,15 @@ struct AirportData {
 
 #[derive(Debug, Deserialize)]
 struct AircraftData {
-    reg: Option<String>,
-    lat: Option<f64>,
-    lng: Option<f64>,
+    model: Option<String>,
+    manufacture: Option<String>,
+    engine: Option<String>,
+    built: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FlightData {
+    reg_number: Option<String>,
     flight_iata: Option<String>,
     flight_icao: Option<String>,
     airline_iata: Option<String>,
@@ -51,12 +53,8 @@ struct FlightData {
     arr_iata: Option<String>,
     status: Option<String>,
     duration: Option<i64>,
-    model: Option<String>,
-    manufacture: Option<String>,
     dep_time: Option<String>,
     arr_time: Option<String>,
-    engine: Option<String>,
-    built: Option<i64>,
     speed: Option<i64>,
     alt: Option<i64>,
     arr_estimated: Option<String>,
@@ -180,6 +178,26 @@ async fn airport_lookup(api_key: &str, code: &str) -> Result<AirportData> {
         .ok_or_else(|| eyre!("Airport list was empty for code: {code}"))
 }
 
+async fn aircraft_lookup(api_key: &str, reg: &str) -> Result<AircraftData> {
+    let url = format!("https://airlabs.co/api/v9/fleets?reg_number={reg}&api_key={api_key}");
+
+    let client = reqwest::Client::new();
+    let response: AircraftResponse = client.get(url).send().await?.json().await?;
+
+    if let Some(err) = response.error {
+        return Err(eyre!("API Error: {}", err.message));
+    }
+
+    let aircraft = response
+        .response
+        .ok_or_else(|| eyre!("No aircraft data found for registration: {reg}"))?;
+
+    aircraft
+        .into_iter()
+        .next()
+        .ok_or_else(|| eyre!("Aircraft list was empty for registration: {reg}"))
+}
+
 async fn flight_lookup(ctx: PoiseContext<'_>, api_key: &str, code: &str) -> Option<FlightData> {
     let date = Local::now().format("%Y-%m-%d").to_string();
 
@@ -219,33 +237,6 @@ async fn flight_lookup(ctx: PoiseContext<'_>, api_key: &str, code: &str) -> Opti
     };
 
     Some(flight)
-}
-
-async fn aircraft_lookup(ctx: PoiseContext<'_>, api_key: &str, reg: &str) -> Option<AircraftData> {
-    let date = Local::now().format("%Y-%m-%d").to_string();
-
-    let url = format!(
-        "https://airlabs.co/api/v9/fleets?reg_number={reg}&api_key={api_key}&flight_date={date}"
-    );
-
-    let client = reqwest::Client::new();
-    let response: AircraftResponse = client.get(url).send().await.ok()?.json().await.ok()?;
-
-    if let Some(err) = response.error {
-        ctx.reply(format!("API Error: {}", err.message))
-            .await
-            .ok()?;
-        return None;
-    }
-
-    let Some(aircraft) = response.response else {
-        ctx.reply("No aircraft found for that registration number.")
-            .await
-            .ok()?;
-        return None;
-    };
-
-    Some(aircraft)
 }
 
 ///get information on a specified flight
@@ -448,27 +439,46 @@ pub async fn plane_details(ctx: PoiseContext<'_>, search: String) -> Result<()> 
         )
     };
 
+    let registration = flight.reg_number.unwrap_or_default();
+
+    if registration.is_empty() {
+        ctx.reply("Registration number not available for this flight.")
+            .await?;
+        return Ok(());
+    }
+
+    let aircraft = match aircraft_lookup(&api_key, &registration).await {
+        Ok(aircraft) => aircraft,
+        Err(e) => {
+            ctx.reply(format!(
+                "Failed to lookup aircraft details for registration {registration}: {e}"
+            ))
+            .await?;
+            return Ok(());
+        }
+    };
+
     let status = flight
         .status
         .as_ref()
         .map(String::as_str)
         .unwrap_or("Unknown");
-    let aircraft = flight
+    let airframe = aircraft
         .model
         .as_ref()
         .map(String::as_str)
         .unwrap_or("BoingBus 67420 Max");
-    let manufacture = flight
+    let manufacture = aircraft
         .manufacture
         .as_ref()
         .map(String::as_str)
         .unwrap_or("BoingBus");
-    let engine = flight
+    let engine = aircraft
         .engine
         .as_ref()
         .map(String::as_str)
         .unwrap_or("FartJet");
-    let built = flight.built.unwrap_or(0);
+    let built = aircraft.built.unwrap_or(0);
     let current_date = chrono::Utc::now();
     let age = current_date.year() - built as i32;
 
@@ -480,7 +490,8 @@ pub async fn plane_details(ctx: PoiseContext<'_>, search: String) -> Result<()> 
         .field("Airline", airline, true)
         .field("Status", status, true)
         .field("\u{200B}", "\u{200B}", true)
-        .field("Aircraft Type", aircraft, true)
+        .field("Registration", registration, true)
+        .field("Aircraft Type", airframe, true)
         .field("Manufacture", manufacture, true)
         .field("Engine Type", engine, true)
         .field("Age", format!("{age} years"), true)
